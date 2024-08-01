@@ -90,16 +90,18 @@ wholecontent = " ".join(list(map(lambda page: page.page_content, content)))
 open('pdf_output.txt','w').write(wholecontent)
 #print(type(content[0]))
 #input()
-
+content = list(map(lambda page: page.page_content, content))
+print(len(content))
+#input()
 content2 = ''
 pagesummaries = {}
 for index,page in enumerate(content):
     print(index)
-    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page.page_content, "page":index,"summary":content2})
+    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page, "page":index,"summary":content2})
     pagesummaries[f'page_{index}'] = content2
     print(content2)
-    if index == 2:
-        break
+    #if index == 2:
+    #    break
 content2 =  json.dumps(pagesummaries)
 open('summarize_output.txt','w').write(content2)
 print('Summarize Output')
