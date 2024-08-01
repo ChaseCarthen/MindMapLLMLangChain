@@ -55,6 +55,13 @@ SUMMARY:
 {summary}
 """
 
+summarize_template = """
+PAGE_INSTRUCTIONS: The page of the article is being provided to you
+PAGE: {page}
+SYSTEM: {system}
+CONTENT: {content}
+"""
+
 outtemplate = """
 FORMAT: {format_instructions}
 SYSTEM: {system}
@@ -97,11 +104,11 @@ content2 = ''
 pagesummaries = {}
 for index,page in enumerate(content):
     print(index)
-    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page, "page":index,"summary":content2})
+    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page, "page":index})
     pagesummaries[f'page_{index}'] = content2
     print(content2)
-    #if index == 2:
-    #    break
+    if index == 8:
+        break
 content2 =  json.dumps(pagesummaries)
 open('summarize_output.txt','w').write(content2)
 print('Summarize Output')
