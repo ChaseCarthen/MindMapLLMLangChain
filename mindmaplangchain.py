@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_community.document_loaders import UnstructuredPDFLoader,PyPDFLoader
 from graphviz import Source
+import json
 #from strip_tags import strip_tags
 
 
@@ -44,6 +45,16 @@ SYSTEM: {system}
 CONTENT: {content}
 """
 
+summarize_template = """
+PAGE_INSTRUCTIONS: The page of the article is being provided to you. Please append to your summary under SUMMARY based on the new contents of the page and do not include the example I gave in the new summary
+PAGE: {page}
+SYSTEM: {system}
+CONTENT: {content}
+SUMMARY:
+------------------------------- 
+{summary}
+"""
+
 outtemplate = """
 FORMAT: {format_instructions}
 SYSTEM: {system}
@@ -51,11 +62,13 @@ CONTENT: {content}
 """
 
 prompt = ChatPromptTemplate.from_template(template=template)
+summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template)
 parser = JsonOutputParser(pydantic_model=Output)
 outprompt = PromptTemplate(template=outtemplate,input_variables=["system","content","format_instructions"])
 outspecificprompt = PromptTemplate(template=outtemplate,input_variables=["system","content"],partial_variables={"format_instructions":parser.get_format_instructions()})
 
 chain = prompt | model
+summarize_chain = summarize_prompt | model
 rdfchain = outspecificprompt | model | parser
 dotchain = outprompt | model 
 
@@ -72,12 +85,22 @@ soup = BeautifulSoup(response.content, 'html.parser')
 # Extract the main content of the page
 content = soup.find(id='bodyContent').get_text()
 content = loader.load_and_split()
-content = " ".join(list(map(lambda page: page.page_content, content)))
-open('pdf_output.txt','w').write(content)
+#content = " ".join(list(map(lambda page: page.page_content, content)))
+wholecontent = " ".join(list(map(lambda page: page.page_content, content)))
+open('pdf_output.txt','w').write(wholecontent)
 #print(type(content[0]))
 #input()
 
-content2 = chain.invoke({"system":dotsummarize, "content": content})
+content2 = ''
+pagesummaries = {}
+for index,page in enumerate(content):
+    print(index)
+    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page.page_content, "page":index,"summary":content2})
+    pagesummaries[f'page_{index}'] = content2
+    print(content2)
+    if index == 2:
+        break
+content2 =  json.dumps(pagesummaries)
 open('summarize_output.txt','w').write(content2)
 print('Summarize Output')
 input()
