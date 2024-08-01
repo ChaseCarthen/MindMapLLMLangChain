@@ -45,7 +45,7 @@ SYSTEM: {system}
 CONTENT: {content}
 """
 
-summarize_template = """
+summarize_template_2 = """
 PAGE_INSTRUCTIONS: The page of the article is being provided to you. Please append to your summary under SUMMARY based on the new contents of the page and do not include the example I gave in the new summary
 PAGE: {page}
 SYSTEM: {system}
@@ -69,7 +69,7 @@ CONTENT: {content}
 """
 
 prompt = ChatPromptTemplate.from_template(template=template)
-summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template)
+summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template_2)
 parser = JsonOutputParser(pydantic_model=Output)
 outprompt = PromptTemplate(template=outtemplate,input_variables=["system","content","format_instructions"])
 outspecificprompt = PromptTemplate(template=outtemplate,input_variables=["system","content"],partial_variables={"format_instructions":parser.get_format_instructions()})
@@ -104,7 +104,7 @@ content2 = ''
 pagesummaries = {}
 for index,page in enumerate(content):
     print(index)
-    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page, "page":index})
+    content2 = summarize_chain.invoke({"system":dotsummarize, "content": page, "page":index, "summary":content2})
     pagesummaries[f'page_{index}'] = content2
     print(content2)
     if index == 8:
