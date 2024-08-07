@@ -21,6 +21,7 @@ from langchain_community.document_loaders import UnstructuredPDFLoader,PyPDFLoad
 from graphviz import Source
 import json
 import re
+import tiktoken
 #from strip_tags import strip_tags
 
 
@@ -29,7 +30,7 @@ class Output(BaseModel):
     content: str = Field(description="The content where the output is stored.")
 
 
-model = OllamaLLM(model="llama3.1")
+model = OllamaLLM(model="llama3.1",temperature=1,top_k=50,top_p=.5,repeat_penalty=1.2,num_ctx=16000)
 #model = OllamaLLM(model="llama3.1:70b-instruct-q2_k")
 #model = ChatOllama(model='llama3.1')
 
@@ -40,7 +41,8 @@ base_prompt = hub.pull("langchain-ai/react-agent-template")
 dotpromptinstructions = open('prompt-dot.md','r').read()
 dotrdf = open('prompt-rdf.md','r').read()
 dotsummarize = open('prompt-summarize-scholarly.md','r').read()
-dotextractterms = open('prompt-extract-terms.md','r').read()
+#dotextractterms = open('prompt-extract-terms.md','r').read()
+dotextractterms = open('prompt-terms.md','r').read()
 
 
 
@@ -79,6 +81,25 @@ CONTENT 2: {content2}
 """
 
 
+def loadWebPage(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    content = soup.find(id='bodyContent').get_text()
+    return content
+
+def parsePDF(filename,all=False):
+    loader = PyPDFLoader(filename)
+    content = loader.load_and_split()
+    if all:
+        return " ".join(list(map(lambda page: page.page_content, content)))
+    return content
+def create_graph(chain,content):
+    return content
+
+def extract_terms(content):
+    return content
+
+
 sumprompt = ChatPromptTemplate.from_template(template=summarizeTemplate)
 prompt = ChatPromptTemplate.from_template(template=template)
 summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template)
@@ -94,35 +115,18 @@ dotchain = outprompt | model
 
 url = 'https://en.wikipedia.org/wiki/Metacognition'
 
-pdffile = './2407.19594.pdf'
-#pdffile = './93439.pdf'
-loader = PyPDFLoader(pdffile)
-# Fetch the page content
-response = requests.get(url)
+pdffile = '2003.04761v1.pdf'
+content = parsePDF(pdffile, all = False)
 
-# Parse the content using BeautifulSoup
-soup = BeautifulSoup(response.content, 'html.parser')
 
-# Extract the main content of the page
-content = soup.find(id='bodyContent').get_text()
-content = loader.load_and_split()
-#content = " ".join(list(map(lambda page: page.page_content, content)))
-wholecontent = " ".join(list(map(lambda page: page.page_content, content)))
-open('pdf_output.txt','w').write(wholecontent)
-#print(type(content[0]))
-#input()
-content = list(map(lambda page: page.page_content, content))
-print(len(content))
-#input()
+encoding = tiktoken.get_encoding('cl100k_base')
 content2 = ''
 pagesummaries = {}
 summarylist = []
-combinedSummaries = {"key_terms":[],"concepts":[],"relationships":[]}
+combinedSummaries = {"key_terms":[],"concepts":[],"relationships":[],"facts":[]}
 combinedPages = {}
+
 for index,page in enumerate(content):
-    #content2 = chain.invoke({"system":dotextractterms,"content":page})
-    #print(test)
-    #print(index)
     content2 = summarize_chain.invoke({"system":dotextractterms, "content": page, "page":index})
     pattern = re.compile(r'```json(.*?)```', re.DOTALL)
 
@@ -132,52 +136,43 @@ for index,page in enumerate(content):
     # Print the extracted code blocks
     for match in matches:
         content2 = match.strip()
-    print(content2)
-    content2 =json.loads(content2)
-
-    combinedSummaries["key_terms"] += content2["key_terms"]
-    combinedSummaries["concepts"] += content2["concepts"]
-    combinedSummaries["relationships"] += content2["relationships"]
-    combinedSummaries["key_terms"] = list(set(combinedSummaries['key_terms']))
-    #combinedSummaries["concepts"] = list(set(combinedSummaries['concepts']))
-    #combinedSummaries["relationships"] = list(set(combinedSummaries['relationships']))
-
-    #input()
-    pagesummaries[f'page_{index}'] = content2
-    combinedPages[f'page_{index}'] = content2
     #print(content2)
-    if (index+1) % 4 == 0 and index > 0:
-        summarylist.append(json.dumps(pagesummaries))
-        pagesummaries = {}
-        #break
-    #if index == 7:
-    #    break
-    #if index != 0:
-    #    content2 = schain.invoke({"content":content2,"content2":oldcontent})
-    #    print(content2)
-    #oldcontent = content2
-#content2 =  json.dumps(pagesummaries)
-#open('summarize_output.txt','w').write(content2)
-print('Summarize Output')
+    print(index,len(content))
+    try:
+        content2 =json.loads(content2)
+        combinedSummaries["key_terms"] += content2["key_terms"]
+        combinedSummaries["concepts"] += content2["concepts"]
+        combinedSummaries["relationships"] += content2["relationships"]
+        combinedSummaries["facts"] += content2["facts"]
+        combinedSummaries["key_terms"] = list(set(combinedSummaries['key_terms']))
+        print(len(encoding.encode(json.dumps(content2))))
+        pagesummaries[f'page_{index}'] = content2
+        combinedPages[f'page_{index}'] = content2
 
+        if (index+1) % 4 == 0 and index > 0:
+            summarylist.append(json.dumps(pagesummaries))
+            pagesummaries = {}
+            
+    except Exception as e:
+        print(e)
+        continue
+
+print('Generating GraphViz Output')
 open('combinedout.txt','w').write(json.dumps(combinedPages))
 
-#content2  = schain.invoke({"content":content2})
-#input()
-#print(dotrdf,content2)
-#print(dotrdf)
-#content3 = chain.invoke({"system":dotrdf, "content": content2})
-#open('rdf_output.txt','w').write(content3)
-
 for i,content in enumerate(summarylist):
+    print(len(encoding.encode(content)))
     content4 = dotchain.invoke({"system":dotpromptinstructions, "content": content,"format_instructions":"please only output the dot file and please no elaboration.\n"})
 
+    try:
+        open(f'graphviz_output_{i}.dot','w').write(content4)
+        source = Source(content4)
+        source.render(f'graphviz_output_{i}.dot', format='png')
+    except Exception as e:
+        print(e)
 
-    open(f'graphviz_output_{i}.dot','w').write(content4)
-    source = Source(content4)
-    source.render(f'graphviz_output_{i}', format='png')
-
+print(len(encoding.encode(json.dumps(combinedSummaries))))
 content4 = dotchain.invoke({"system":'Hi take this dataset and produce me a mindmap using only the DOT format from graphviz. Only output the DOT file please.', "content": json.dumps(combinedSummaries),"format_instructions":"please only output the dot file and please no elaboration.\n"})
-open('graphviz_output_combined.dot','w').write(content4)
+#open('graphviz_output_combined.dot','w').write(content4)
 source = Source(content4)
-source.render('graphviz_output_combined', format='png')
+source.render('graphviz_output_combined.dot', format='png')
