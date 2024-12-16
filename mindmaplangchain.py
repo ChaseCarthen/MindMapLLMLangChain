@@ -18,6 +18,10 @@ from bs4 import BeautifulSoup
 
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_community.document_loaders import UnstructuredPDFLoader,PyPDFLoader
+from langchain_experimental.graph_transformers import LLMGraphTransformer
+from langchain_community.graphs import Neo4jGraph
+from langchain_core.documents import Document
+
 from graphviz import Source
 import json
 import re
@@ -30,20 +34,23 @@ class Output(BaseModel):
     content: str = Field(description="The content where the output is stored.")
 
 
-model = OllamaLLM(model="llama3.1",temperature=1,top_k=50,top_p=.5,repeat_penalty=1.2,num_ctx=16000)
-#model = OllamaLLM(model="llama3.1:70b-instruct-q2_k")
-#model = ChatOllama(model='llama3.1')
+def loadWebPage(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    content = soup.find(id='bodyContent').get_text()
+    return content
 
+def parsePDF(filename,all=False):
+    loader = PyPDFLoader(filename)
+    content = loader.load_and_split()
+    if all:
+        return " ".join(list(map(lambda page: page.page_content, content)))
+    return content
+def create_graph(chain,content):
+    return content
 
-base_prompt = hub.pull("langchain-ai/react-agent-template")
-
-
-dotpromptinstructions = open('prompt-dot.md','r').read()
-dotrdf = open('prompt-rdf.md','r').read()
-dotsummarize = open('prompt-summarize-scholarly.md','r').read()
-#dotextractterms = open('prompt-extract-terms.md','r').read()
-dotextractterms = open('prompt-terms.md','r').read()
-
+def extract_terms(content):
+    return content
 
 
 template = """
@@ -80,99 +87,128 @@ CONTENT: {content}
 CONTENT 2: {content2}
 """
 
-
-def loadWebPage(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    content = soup.find(id='bodyContent').get_text()
-    return content
-
-def parsePDF(filename,all=False):
-    loader = PyPDFLoader(filename)
-    content = loader.load_and_split()
-    if all:
-        return " ".join(list(map(lambda page: page.page_content, content)))
-    return content
-def create_graph(chain,content):
-    return content
-
-def extract_terms(content):
-    return content
+url="bolt://localhost:7687"
+username = "neo4j"
+password = "testtest"
 
 
-sumprompt = ChatPromptTemplate.from_template(template=summarizeTemplate)
-prompt = ChatPromptTemplate.from_template(template=template)
-summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template)
-parser = JsonOutputParser(pydantic_model=Output)
-outprompt = PromptTemplate(template=outtemplate,input_variables=["system","content","format_instructions"])
-outspecificprompt = PromptTemplate(template=outtemplate,input_variables=["system","content"],partial_variables={"format_instructions":parser.get_format_instructions()})
+model = OllamaLLM(model="llama3.1",temperature=1,top_k=50,top_p=.5,repeat_penalty=1.2,num_ctx=16000)
+#model = OllamaLLM(model="llama3.1:70b-instruct-q2_k")
+#model = ChatOllama(model='llama3.1')
 
-chain = prompt | model
-schain = sumprompt | model
-summarize_chain = summarize_prompt | model
-rdfchain = outspecificprompt | model | parser
-dotchain = outprompt | model 
+files = ['./pdfs/paper7.pdf']
 
-url = 'https://en.wikipedia.org/wiki/Metacognition'
+def neo4jGraphSearch(model,files=[]):
+    graph = Neo4jGraph(url=url,username=username,password=password)
+    llm_transformer = LLMGraphTransformer(llm=model)
+    #documents = PyPDFLoader()
+    loader = PyPDFLoader(files[0])
+    documents1 = loader.load()#.load_and_split()
+    documents2 = loader.load_and_split()
+    print(type(documents2[0]))
+    #print('---------')
+    #print(documents1[0])
+    #input()
+    text = """
+    Marie Curie, born in 1867, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
+    She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
+    Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
+    She was, in 1906, the first woman to become a professor at the University of Paris.
+    """
+    #documents = [Document(page_content=text)]
+    #page1 = documents2[0]
+    #print(page1.page_content)
+    graph_documents = llm_transformer.convert_to_graph_documents([documents2[0]])
+    print(f"Nodes:{graph_documents[0].nodes}")
+    print(f"Relationships:{graph_documents[0].relationships}")
+    graph.add_graph_documents(graph_documents)
 
-pdffile = '2003.04761v1.pdf'
-content = parsePDF(pdffile, all = False)
+
+neo4jGraphSearch(model,files)
+
+def makeGraphVizVisualization(model=model):
+    base_prompt = hub.pull("langchain-ai/react-agent-template")
 
 
-encoding = tiktoken.get_encoding('cl100k_base')
-content2 = ''
-pagesummaries = {}
-summarylist = []
-combinedSummaries = {"key_terms":[],"concepts":[],"relationships":[],"facts":[]}
-combinedPages = {}
+    dotpromptinstructions = open('prompt-dot.md','r').read()
+    dotrdf = open('prompt-rdf.md','r').read()
+    dotsummarize = open('prompt-summarize-scholarly.md','r').read()
+    #dotextractterms = open('prompt-extract-terms.md','r').read()
+    dotextractterms = open('prompt-terms.md','r').read()
+    sumprompt = ChatPromptTemplate.from_template(template=summarizeTemplate)
+    prompt = ChatPromptTemplate.from_template(template=template)
+    summarize_prompt = ChatPromptTemplate.from_template(template=summarize_template)
+    parser = JsonOutputParser(pydantic_model=Output)
+    outprompt = PromptTemplate(template=outtemplate,input_variables=["system","content","format_instructions"])
+    outspecificprompt = PromptTemplate(template=outtemplate,input_variables=["system","content"],partial_variables={"format_instructions":parser.get_format_instructions()})
 
-for index,page in enumerate(content):
-    content2 = summarize_chain.invoke({"system":dotextractterms, "content": page, "page":index})
-    pattern = re.compile(r'```json(.*?)```', re.DOTALL)
+    chain = prompt | model
+    schain = sumprompt | model
+    summarize_chain = summarize_prompt | model
+    rdfchain = outspecificprompt | model | parser
+    dotchain = outprompt | model 
 
-    # Find all matches
-    matches = pattern.findall(content2)
+    url = 'https://en.wikipedia.org/wiki/Metacognition'
 
-    # Print the extracted code blocks
-    for match in matches:
-        content2 = match.strip()
-    #print(content2)
-    print(index,len(content))
-    try:
-        content2 =json.loads(content2)
-        combinedSummaries["key_terms"] += content2["key_terms"]
-        combinedSummaries["concepts"] += content2["concepts"]
-        combinedSummaries["relationships"] += content2["relationships"]
-        combinedSummaries["facts"] += content2["facts"]
-        combinedSummaries["key_terms"] = list(set(combinedSummaries['key_terms']))
-        print(len(encoding.encode(json.dumps(content2))))
-        pagesummaries[f'page_{index}'] = content2
-        combinedPages[f'page_{index}'] = content2
+    pdffile = '2003.04761v1.pdf'
+    pdffile = '93439.pdf'
+    content = parsePDF(pdffile, all = False)
 
-        if (index+1) % 4 == 0 and index > 0:
-            summarylist.append(json.dumps(pagesummaries))
-            pagesummaries = {}
-            
-    except Exception as e:
-        print(e)
-        continue
 
-print('Generating GraphViz Output')
-open('combinedout.txt','w').write(json.dumps(combinedPages))
+    encoding = tiktoken.get_encoding('cl100k_base')
+    content2 = ''
+    pagesummaries = {}
+    summarylist = []
+    combinedSummaries = {"key_terms":[],"concepts":[],"relationships":[],"facts":[]}
+    combinedPages = {}
 
-for i,content in enumerate(summarylist):
-    print(len(encoding.encode(content)))
-    content4 = dotchain.invoke({"system":dotpromptinstructions, "content": content,"format_instructions":"please only output the dot file and please no elaboration.\n"})
+    for index,page in enumerate(content):
+        content2 = summarize_chain.invoke({"system":dotextractterms, "content": page, "page":index})
+        pattern = re.compile(r'```json(.*?)```', re.DOTALL)
 
-    try:
-        open(f'graphviz_output_{i}.dot','w').write(content4)
-        source = Source(content4)
-        source.render(f'graphviz_output_{i}.dot', format='png')
-    except Exception as e:
-        print(e)
+        # Find all matches
+        matches = pattern.findall(content2)
 
-print(len(encoding.encode(json.dumps(combinedSummaries))))
-content4 = dotchain.invoke({"system":'Hi take this dataset and produce me a mindmap using only the DOT format from graphviz. Only output the DOT file please.', "content": json.dumps(combinedSummaries),"format_instructions":"please only output the dot file and please no elaboration.\n"})
-#open('graphviz_output_combined.dot','w').write(content4)
-source = Source(content4)
-source.render('graphviz_output_combined.dot', format='png')
+        # Print the extracted code blocks
+        for match in matches:
+            content2 = match.strip()
+        #print(content2)
+        print(index,len(content))
+        try:
+            content2 =json.loads(content2)
+            combinedSummaries["key_terms"] += content2["key_terms"]
+            combinedSummaries["concepts"] += content2["concepts"]
+            combinedSummaries["relationships"] += content2["relationships"]
+            combinedSummaries["facts"] += content2["facts"]
+            combinedSummaries["key_terms"] = list(set(combinedSummaries['key_terms']))
+            print(len(encoding.encode(json.dumps(content2))))
+            pagesummaries[f'page_{index}'] = content2
+            combinedPages[f'page_{index}'] = content2
+
+            if (index+1) % 4 == 0 and index > 0:
+                summarylist.append(json.dumps(pagesummaries))
+                pagesummaries = {}
+                
+        except Exception as e:
+            print(e)
+            continue
+
+    print('Generating GraphViz Output')
+    open('combinedout.txt','w').write(json.dumps(combinedPages))
+
+    for i,content in enumerate(summarylist):
+        print(len(encoding.encode(content)))
+        content4 = dotchain.invoke({"system":dotpromptinstructions, "content": content,"format_instructions":"please only output the dot file and please no elaboration.\n"})
+
+        try:
+            open(f'graphviz_output_{i}.dot','w').write(content4)
+            source = Source(content4)
+            source.render(f'graphviz_output_{i}.dot', format='png')
+        except Exception as e:
+            print(e)
+
+    print(len(encoding.encode(json.dumps(combinedSummaries))))
+    content4 = dotchain.invoke({"system":'Hi take this dataset and produce me a mindmap using only the DOT format from graphviz. Only output the DOT file please.', "content": json.dumps(combinedSummaries),"format_instructions":"please only output the dot file and please no elaboration.\n"})
+    #open('graphviz_output_combined.dot','w').write(content4)
+    source = Source(content4)
+    source.render('graphviz_output_combined.dot', format='png')

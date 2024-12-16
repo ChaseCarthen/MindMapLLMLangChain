@@ -3,3 +3,4 @@ pdfminer.six
 unstructured[all]
 unstructured_inference
 pillow_heif
+chroma
